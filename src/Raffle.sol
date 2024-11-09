@@ -38,7 +38,7 @@ contract Raffle is VRFConsumerBaseV2Plus {
     error Raffle__TooEarly();
     error Raffle__TransferFailed();
     error Raffle__RaffleNotOpen();
-
+    error Raffle__UpkeepNotNeeded(uint256 balance, uint256 playersLength, uint256 raffleState);
     /* Type declarations */
     enum RaffleState {
         OPEN,
@@ -92,10 +92,30 @@ contract Raffle is VRFConsumerBaseV2Plus {
         s_players.push(payable(msg.sender));
         emit RaffleEntered(msg.sender);
     }
+    /**
+     * @dev This is the function that Chainlink Keepers will call to check if it's time to perform upkeep
+     * 1. The time interval has passed between raffle picks
+     * 2. The raffle is open
+     * 3. The contract has ETH (aka players)
+     * 4. Our subs is funded with LINK
+     * @param - ignored
+     * @return upkeepNeeded - true if upkeep is needed, false otherwise
+     * @return - ignored
+     */
+    function checkUpkeep(bytes memory /* checkData */) public view returns (bool upkeepNeeded, bytes memory /* performData */)
+    {
+        bool timeHasPassed = ((block.timestamp - s_lastTimeStamp) >= i_interval);
+        bool hasPlayers = s_players.length > 0;
+        bool raffleIsOpen = s_raffleState == RaffleState.OPEN;
+        bool hasBalance = address(this).balance > 0;
+        upkeepNeeded = (timeHasPassed && hasPlayers && raffleIsOpen && hasBalance);
+        return (upkeepNeeded, ""); // can be empty
+    }
 
-    function pickWinner() external {
-        if (block.timestamp - s_lastTimeStamp < i_interval) {
-            revert Raffle__TooEarly();
+    function performUpkeep(bytes memory /* performData */) external {
+        (bool upkeepNeeded, ) = checkUpkeep("");
+        if (!upkeepNeeded) {
+            revert Raffle__UpkeepNotNeeded(address(this).balance, s_players.length, uint256(s_raffleState));
         }
         s_raffleState = RaffleState.CALCULATING;
         VRFV2PlusClient.RandomWordsRequest memory request = VRFV2PlusClient.RandomWordsRequest({
@@ -106,10 +126,10 @@ contract Raffle is VRFConsumerBaseV2Plus {
                 numWords: NUM_WORDS,
                 extraArgs: VRFV2PlusClient._argsToBytes(VRFV2PlusClient.ExtraArgsV1({nativePayment: true})) // new parameter
             });
-        uint256 requestID = s_vrfCoordinator.requestRandomWords(request);
+        s_vrfCoordinator.requestRandomWords(request);
     }
 
-    function fulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) internal override {
+    function fulfillRandomWords(uint256/*requestId*/, uint256[] calldata randomWords) internal override {
         // Checks - it is more gas efficient to check the state and do any revert before the state changes
         // Requires , conditionals
         // Helps to deal with reentrancy attacks
