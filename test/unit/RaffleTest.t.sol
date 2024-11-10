@@ -10,8 +10,6 @@ contract RaffleTest is Test {
     Raffle public raffle;
     HelperConfig public helperConfig;
 
-
-
     uint256 entranceFee;
     uint256 interval;
     address vrfCoordinator;
@@ -22,6 +20,7 @@ contract RaffleTest is Test {
     address public PLAYER = makeAddr("player"); // foundry cheatcoat to make an address from a string
     uint256 public constant STARTING_USER_BALANCE = 10 ether;
 
+    // We have to add the events to the test as we cannot import them from the contract like we do with the structs
     event RaffleEntered(address indexed player);
     event WinnerPicked(address indexed winner);
 
@@ -63,7 +62,20 @@ contract RaffleTest is Test {
     function testEnteringRaffleEmitsEvent() public {
         vm.prank(PLAYER);
         vm.expectEmit(true, false, false, false, address(raffle));
-        emit RaffleEntered(address(0));
+        emit RaffleEntered(PLAYER);
+        raffle.enterRaffle{value: entranceFee}();
+    }
+
+    function testDontAllowPlayersToEnterWhileRaffleIsCalculating() public {
+        // Arrange
+        vm.prank(PLAYER);
+        raffle.enterRaffle{value: entranceFee}();
+        vm.warp(block.timestamp + interval + 1); // changes the timestamp
+        vm.roll(block.number + 1); // changes the block number
+        raffle.performUpkeep("");
+        // Act / Assert
+        vm.expectRevert(Raffle.Raffle__RaffleNotOpen.selector);
+        vm.prank(PLAYER);
         raffle.enterRaffle{value: entranceFee}();
     }
 }
